@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Расписание поездов</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: transparent;
+      color: #fff;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 15px;
+    }
+
+    .widget {
+      background: transparent;
+      padding: 12px;
+    }
+
+    /* Top bar — centered, no background */
+    .top-bar {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .header-text {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #fff;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 0;
+    }
+
+    .tab-btn {
+      padding: 8px 28px;
+      background: transparent;
+      color: #ccc;
+      border: 1px solid #3a3c47;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+
+    .tab-btn:first-child { border-radius: 4px 0 0 4px; }
+    .tab-btn:last-child  { border-radius: 0 4px 4px 0; }
+
+    .tab-btn.active {
+      background: #c0392b;
+      color: #fff;
+      border-color: #c0392b;
+    }
+
+    .tab-btn:hover:not(.active) {
+      background: rgba(255,255,255,0.07);
+      color: #fff;
+    }
+
+    /* Board — only the table area has a border/frame, no bg */
+    .board {
+      border: 1px solid #3a3c47;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .board-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: rgba(0,0,0,0.25);
+      border-bottom: 1px solid #3a3c47;
+    }
+
+    .board-title { font-size: 16px; font-weight: 700; }
+    .board-subtitle { font-size: 12px; color: #aaa; margin-top: 2px; }
+
+    .clock-block {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .clock-label { font-size: 10px; color: #aaa; text-align: right; line-height: 1.3; }
+
+    .clock {
+      background: rgba(0,0,0,0.4);
+      color: #fff;
+      font-size: 20px;
+      font-weight: 700;
+      font-family: monospace;
+      padding: 4px 10px;
+      border-radius: 4px;
+      min-width: 70px;
+      text-align: center;
+    }
+
+    /* Table */
+    table { width: 100%; border-collapse: collapse; }
+
+    thead tr { background: #c0392b; color: #fff; }
+
+    thead th {
+      padding: 9px 12px;
+      text-align: left;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      transition: background 0.1s;
+      background: rgba(0,0,0,0.15);
+    }
+
+    tbody tr:nth-child(even) { background: rgba(0,0,0,0.25); }
+    tbody tr:hover { background: rgba(255,255,255,0.06); }
+
+    tbody td {
+      padding: 10px 12px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .train-num  { color: #f5c518; font-size: 16px; }
+    .direction  { color: #f5c518; }
+    .time       { font-size: 15px; }
+    .dash       { color: #555; font-weight: 400; }
+    .cat-cell   { font-size: 13px; font-weight: 700; color: #ddd; }
+
+    .empty-msg {
+      padding: 36px 16px;
+      text-align: center;
+      color: #666;
+      font-size: 14px;
+      background: rgba(0,0,0,0.15);
+    }
+
+    .error-msg {
+      padding: 16px;
+      background: rgba(90,20,20,0.5);
+      color: #f88;
+      text-align: center;
+      font-size: 13px;
+    }
+
+    .loading {
+      padding: 36px;
+      text-align: center;
+      color: #777;
+      background: rgba(0,0,0,0.15);
+    }
+  </style>
+</head>
+<body>
+<div class="widget">
+  <div class="top-bar">
+    <div class="header-text" id="header-text">РАСПИСАНИЕ НА</div>
+    <div class="tabs">
+      <button class="tab-btn active" onclick="selectStation('mirny')"     id="tab-mirny">Мирный</button>
+      <button class="tab-btn"        onclick="selectStation('nevsky')"    id="tab-nevsky">Невский</button>
+      <button class="tab-btn"        onclick="selectStation('privolzhsk')" id="tab-privolzhsk">Приволжск</button>
+    </div>
+  </div>
+
+  <div class="board">
+    <div class="board-header">
+      <div>
+        <div class="board-title" id="board-title">Прибытие и отправление</div>
+        <div class="board-subtitle" id="station-label">Станция Мирный</div>
+      </div>
+      <div class="clock-block">
+        <div class="clock-label" id="clock-label">Московское<br>время</div>
+        <div class="clock" id="clock">--:--</div>
+      </div>
+    </div>
+    <div id="table-wrap">
+      <div class="loading">Загрузка...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---- CONFIG ----
+  const API_BASE    = window.location.origin
+  const REFRESH_MS  = 20000   // данные каждые 20 с
+  const LANG_MS     = 10000   // язык каждые 10 с
+  const CUTOFF_MIN  = 6 * 60  // 06:00
+
+  // ---- LANG ----
+  const LANG = {
+    ru: {
+      headerPrefix : 'РАСПИСАНИЕ НА',
+      clockLabel   : 'Московское\nвремя',
+      boardTitle   : 'Прибытие и отправление',
+      stationPrefix: 'Станция',
+      stations     : { mirny:'Мирный', nevsky:'Невский', privolzhsk:'Приволжск' },
+      tabs         : { mirny:'Мирный', nevsky:'Невский', privolzhsk:'Приволжск' },
+      colNum:'Номер', colCat:'Категория', colDest:'Направление',
+      colArr:'Прибытие', colDep:'Отправление', colPl:'Путь',
+      noTrains:'Нет рейсов',
+      dirs: {
+        'mirny-privolzhsk':'Мирный — Приволжск',
+        'privolzhsk-mirny':'Приволжск — Мирный',
+      },
+      cls: { 'Скоростной':'СКОР','Пассажирский':'ПАСС','Пригородный':'ПРИГ','Туристический':'ТУР' },
+    },
+    en: {
+      headerPrefix : 'SCHEDULE FOR',
+      clockLabel   : 'Moscow\ntime',
+      boardTitle   : 'Arrivals & Departures',
+      stationPrefix: 'Station',
+      stations     : { mirny:'Mirny', nevsky:'Nevsky', privolzhsk:'Privolzhsk' },
+      tabs         : { mirny:'Mirny', nevsky:'Nevsky', privolzhsk:'Privolzhsk' },
+      colNum:'Train', colCat:'Class', colDest:'Destination',
+      colArr:'Arrival', colDep:'Departure', colPl:'Track',
+      noTrains:'No trains',
+      dirs: {
+        'mirny-privolzhsk':'Mirny — Privolzhsk',
+        'privolzhsk-mirny':'Privolzhsk — Mirny',
+      },
+      cls: { 'Скоростной':'FAST','Пассажирский':'PASS','Пригородный':'SUB','Туристический':'TOUR' },
+    },
+  }
+
+  let lang           = 'ru'
+  let currentStation = 'mirny'
+  // allTrains содержит только занятые рейсы (JOIN train_shifts + trains)
+  let allTrains      = []
+  let fetchError     = null
+
+  const L = () => LANG[lang]
+
+  // ---- MOSCOW TIME ----
+  function moscowNow() {
+    return new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Moscow' }))
+  }
+  function moscowHHMM() {
+    const d = moscowNow()
+    return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0')
+  }
+  function moscowDateStr(d) {
+    return d.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric' })
+  }
+  // YYYY-MM-DD по московскому времени — для параметра date= в API
+  function moscowDateISO(d) {
+    const y   = d.getFullYear()
+    const m   = String(d.getMonth() + 1).padStart(2,'0')
+    const day = String(d.getDate()).padStart(2,'0')
+    return y + '-' + m + '-' + day
+  }
+  function toMin(hhmm) {
+    if (!hhmm) return null
+    const [h,m] = hhmm.split(':').map(Number)
+    return h * 60 + m
+  }
+
+  // ---- CLOCK ----
+  function updateClock() {
+    document.getElementById('clock').textContent = moscowHHMM()
+  }
+  setInterval(updateClock, 5000)
+  updateClock()
+
+  // ---- APPLY LANG ----
+  function applyLang() {
+    const l   = L()
+    const now = moscowNow()
+    document.getElementById('header-text').textContent   = l.headerPrefix + ' ' + moscowDateStr(now)
+    document.getElementById('clock-label').innerHTML     = l.clockLabel.replace('\n','<br>')
+    document.getElementById('board-title').textContent   = l.boardTitle
+    document.getElementById('station-label').textContent = l.stationPrefix + ' ' + l.stations[currentStation]
+    ;['mirny','nevsky','privolzhsk'].forEach(s => {
+      const el = document.getElementById('tab-' + s)
+      if (el) el.textContent = l.tabs[s]
+    })
+    renderTable()
+  }
+
+  // ---- LANG FLIP ----
+  setInterval(() => {
+    lang = lang === 'ru' ? 'en' : 'ru'
+    document.documentElement.lang = lang
+    applyLang()
+  }, LANG_MS)
+
+  // ---- STATION SELECT ----
+  function selectStation(station) {
+    currentStation = station
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'))
+    const el = document.getElementById('tab-' + station)
+    if (el) el.classList.add('active')
+    document.getElementById('station-label').textContent =
+      L().stationPrefix + ' ' + L().stations[station]
+    renderTable()
+  }
+
+  // ---- TRAIN AT STATION ----
+  // Работает с объединёнными строками из train_shifts JOIN trains
+  function getTrainAtStation(train, station) {
+    const dir = train.direction
+    let arrive = null, depart = null, platform = 1
+
+    if (station === 'mirny') {
+      if (dir === 'mirny-privolzhsk') {
+        depart   = train.depart_start;   platform = train.platform_start
+      } else {
+        arrive   = train.arrive_end;     platform = train.platform_end
+      }
+    } else if (station === 'nevsky') {
+      arrive   = train.arrive_middle;   platform = train.platform_middle
+      depart   = train.depart_middle
+    } else if (station === 'privolzhsk') {
+      if (dir === 'mirny-privolzhsk') {
+        arrive   = train.arrive_end;     platform = train.platform_end
+      } else {
+        depart   = train.depart_start;   platform = train.platform_start
+      }
+    }
+
+    if (!arrive && !depart) return null
+    return { arrive, depart, platform }
+  }
+
+  // ---- VISIBILITY LOGIC ----
+  function isVisible(info, nowMin) {
+    const lastMin = toMin(info.depart || info.arrive)
+    if (lastMin === null) return false
+
+    if (nowMin >= CUTOFF_MIN) {
+      return lastMin >= nowMin || lastMin < CUTOFF_MIN
+    } else {
+      return lastMin >= nowMin && lastMin < CUTOFF_MIN
+    }
+  }
+
+  function sortKey(info, nowMin) {
+    const m = toMin(info.depart || info.arrive) ?? 9999
+    if (nowMin >= CUTOFF_MIN && m < CUTOFF_MIN) return m + 24 * 60
+    return m
+  }
+
+  // ---- RENDER ----
+  function renderTable() {
+    const wrap = document.getElementById('table-wrap')
+    const l    = L()
+
+    if (fetchError) {
+      wrap.innerHTML = '<div class="error-msg">' + fetchError + '</div>'
+      sendHeight()
+      return
+    }
+
+    const nowMin = toMin(moscowHHMM())
+
+    const rows = []
+    allTrains.forEach(train => {
+      const info = getTrainAtStation(train, currentStation)
+      if (!info) return
+      if (!isVisible(info, nowMin)) return
+      rows.push({ train, info })
+    })
+
+    rows.sort((a, b) => sortKey(a.info, nowMin) - sortKey(b.info, nowMin))
+
+    if (rows.length === 0) {
+      wrap.innerHTML = '<div class="empty-msg">' + l.noTrains + '</div>'
+      sendHeight()
+      return
+    }
+
+    let html = '<table><thead><tr>'
+    html += '<th>' + l.colNum  + '</th>'
+    html += '<th>' + l.colCat  + '</th>'
+    html += '<th>' + l.colDest + '</th>'
+    html += '<th>' + l.colArr  + '</th>'
+    html += '<th>' + l.colDep  + '</th>'
+    html += '<th>' + l.colPl   + '</th>'
+    html += '</tr></thead><tbody>'
+
+    rows.forEach(({ train, info }) => {
+      const arr = info.arrive
+        ? '<span class="time">'  + info.arrive + '</span>'
+        : '<span class="dash">—</span>'
+      const dep = info.depart
+        ? '<span class="time">'  + info.depart + '</span>'
+        : '<span class="dash">—</span>'
+
+      html += '<tr>'
+      html += '<td class="train-num">'  + train.train_number + '</td>'
+      html += '<td class="cat-cell">'   + (l.cls[train.class] || train.class) + '</td>'
+      html += '<td class="direction">'  + (l.dirs[train.direction] || train.direction) + '</td>'
+      html += '<td>' + arr + '</td>'
+      html += '<td>' + dep + '</td>'
+      html += '<td>' + (info.platform ?? '—') + '</td>'
+      html += '</tr>'
+    })
+
+    html += '</tbody></table>'
+    wrap.innerHTML = html
+    sendHeight()
+  }
+
+  // ---- СООБЩИТЬ ВЫСОТУ РОДИТЕЛЮ (для авторесайза iframe) ----
+  function sendHeight() {
+    const h = document.documentElement.scrollHeight || document.body.scrollHeight
+    try { window.parent.postMessage({ iframeHeight: h }, '*') } catch(e) {}
+  }
+
+  // ---- FETCH ----
+  // ИСПРАВЛЕНИЕ: вместо /api/trains (все рейсы) теперь используем
+  // /api/train-shifts?with_trains=1&date=YYYY-MM-DD — возвращает только
+  // рейсы с занятым машинистом (JOIN train_shifts + trains).
+  // Структура полей идентична объекту trains, поэтому остальной код не меняется.
+  async function fetchData() {
+    try {
+      const dateISO = moscowDateISO(moscowNow())
+      const res = await fetch(API_BASE + '/api/train-shifts?with_trains=1&date=' + dateISO)
+      const json = await res.json()
+      allTrains   = json.data || []
+      fetchError  = null
+    } catch (e) {
+      fetchError = 'Не удалось загрузить расписание'
+    }
+    applyLang()
+  }
+
+  fetchData()
+  setInterval(fetchData, REFRESH_MS)
+</script>
+</body>
+</html>
